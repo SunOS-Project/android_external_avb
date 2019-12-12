@@ -199,7 +199,7 @@ def get_release_string():
 def round_to_multiple(number, size):
   """Rounds a number up to nearest multiple of another number.
 
-  Args:
+  Arguments:
     number: The number to round up.
     size: The multiple to round up to.
 
@@ -216,7 +216,7 @@ def round_to_multiple(number, size):
 def round_to_pow2(number):
   """Rounds a number up to the next power of 2.
 
-  Args:
+  Arguments:
     number: The number to round up.
 
   Returns:
@@ -258,7 +258,7 @@ def decode_long(blob):
   This is the reverse of encode_long().
 
   Arguments:
-    value: A bytearray() with the encoded long.
+    blob: A bytearray() with the encoded long.
 
   Returns:
     The decoded value.
@@ -349,6 +349,9 @@ class RSAPublicKey(object):
 
     Arguments:
       key_path: The path to a key file.
+
+    Raises:
+      AvbError: If RSA key parameters could not be read from file.
     """
     # We used to have something as simple as this:
     #
@@ -401,6 +404,9 @@ def encode_rsa_key(key_path):
 
   Returns:
     A bytearray() with the |AvbRSAPublicKeyHeader|.
+
+  Raises:
+    AvbError: If given RSA key exponent is not 65537.
   """
   key = RSAPublicKey(key_path)
   if key.exponent != 65537:
@@ -437,6 +443,25 @@ def lookup_algorithm_by_type(alg_type):
   raise AvbError('Unknown algorithm type {}'.format(alg_type))
 
 
+def lookup_hash_size_by_type(alg_type):
+  """Looks up hash size by type.
+
+  Arguments:
+    alg_type: The integer representing the type.
+
+  Returns:
+    The corresponding hash size.
+
+  Raises:
+    AvbError: If the algorithm cannot be found.
+  """
+  for alg_name in ALGORITHMS:
+    alg_data = ALGORITHMS[alg_name]
+    if alg_data.algorithm_type == alg_type:
+      return alg_data.hash_num_bytes
+  raise AvbError('Unsupported algorithm type {}'.format(alg_type))
+
+
 def raw_sign(signing_helper, signing_helper_with_files,
              algorithm_name, signature_num_bytes, key_path,
              raw_data_to_sign):
@@ -461,8 +486,8 @@ def raw_sign(signing_helper, signing_helper_with_files,
     signing_file = tempfile.NamedTemporaryFile()
     signing_file.write(str(raw_data_to_sign))
     signing_file.flush()
-    p = subprocess.Popen(
-      [signing_helper_with_files, algorithm_name, key_path, signing_file.name])
+    p = subprocess.Popen([
+        signing_helper_with_files, algorithm_name, key_path, signing_file.name])
     retcode = p.wait()
     if retcode != 0:
       raise AvbError('Error signing')
@@ -492,8 +517,7 @@ def raw_sign(signing_helper, signing_helper_with_files,
 
 
 def verify_vbmeta_signature(vbmeta_header, vbmeta_blob):
-  """Checks that the signature in a vbmeta blob was made by
-     the embedded public key.
+  """Checks that signature in a vbmeta blob was made by the embedded public key.
 
   Arguments:
     vbmeta_header: A AvbVBMetaHeader.
@@ -502,9 +526,13 @@ def verify_vbmeta_signature(vbmeta_header, vbmeta_blob):
   Returns:
     True if the signature is valid and corresponds to the embedded
     public key. Also returns True if the vbmeta blob is not signed.
+
+  Raises:
+    AvbError: If there errors calling out to openssl command during
+        signature verification.
   """
   (_, alg) = lookup_algorithm_by_type(vbmeta_header.algorithm_type)
-  if alg.hash_name == '':
+  if not alg.hash_name:
     return True
   header_blob = vbmeta_blob[0:256]
   auth_offset = 256
@@ -567,19 +595,22 @@ def verify_vbmeta_signature(vbmeta_header, vbmeta_blob):
               '\n'
               '[rsapubkey]\n'
               'n=INTEGER:%s\n'
-              'e=INTEGER:%s\n' % (hex(modulus).rstrip('L'), hex(exponent).rstrip('L')))
+              'e=INTEGER:%s\n' % (hex(modulus).rstrip('L'),
+                                  hex(exponent).rstrip('L')))
   asn1_tmpfile = tempfile.NamedTemporaryFile()
   asn1_tmpfile.write(asn1_str)
   asn1_tmpfile.flush()
   der_tmpfile = tempfile.NamedTemporaryFile()
   p = subprocess.Popen(
-      ['openssl', 'asn1parse', '-genconf', asn1_tmpfile.name, '-out', der_tmpfile.name, '-noout'])
+      ['openssl', 'asn1parse', '-genconf', asn1_tmpfile.name, '-out',
+       der_tmpfile.name, '-noout'])
   retcode = p.wait()
   if retcode != 0:
     raise AvbError('Error generating DER file')
 
   p = subprocess.Popen(
-      ['openssl', 'rsautl', '-verify', '-pubin', '-inkey', der_tmpfile.name, '-keyform', 'DER', '-raw'],
+      ['openssl', 'rsautl', '-verify', '-pubin', '-inkey', der_tmpfile.name,
+       '-keyform', 'DER', '-raw'],
       stdin=subprocess.PIPE,
       stdout=subprocess.PIPE,
       stderr=subprocess.PIPE)
@@ -925,9 +956,12 @@ class ImageHandler(object):
 
     Arguments:
       offset: Offset to seek to from the beginning of the file.
+
+    Raises:
+      RuntimeError: If the given offset is negative.
     """
     if offset < 0:
-      raise RuntimeError("Seeking with negative offset: %d" % offset)
+      raise RuntimeError('Seeking with negative offset: %d' % offset)
     self._file_pos = offset
 
   def read(self, size):
@@ -1128,15 +1162,21 @@ class AvbDescriptor(object):
       image_dir: The directory of the file being verified.
       image_ext: The extension of the file being verified (e.g. '.img').
       expected_chain_partitions_map: A map from partition name to the
-        tuple (rollback_index_location, key_blob).
+          tuple (rollback_index_location, key_blob).
       image_containing_descriptor: The image the descriptor is in.
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
 
     Returns:
       True if the descriptor verifies, False otherwise.
     """
+    # Deletes unused parameters to prevent pylint warning unused-argument.
+    del image_dir, image_ext, expected_chain_partitions_map
+    del image_containing_descriptor, accept_zeroed_hashtree
+
     # Nothing to do.
     return True
+
 
 class AvbPropertyDescriptor(AvbDescriptor):
   """A class for property descriptors.
@@ -1215,15 +1255,17 @@ class AvbPropertyDescriptor(AvbDescriptor):
       image_dir: The directory of the file being verified.
       image_ext: The extension of the file being verified (e.g. '.img').
       expected_chain_partitions_map: A map from partition name to the
-        tuple (rollback_index_location, key_blob).
+          tuple (rollback_index_location, key_blob).
       image_containing_descriptor: The image the descriptor is in.
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
 
     Returns:
       True if the descriptor verifies, False otherwise.
     """
     # Nothing to do.
     return True
+
 
 class AvbHashtreeDescriptor(AvbDescriptor):
   """A class for hashtree descriptors.
@@ -1378,14 +1420,15 @@ class AvbHashtreeDescriptor(AvbDescriptor):
       image_dir: The directory of the file being verified.
       image_ext: The extension of the file being verified (e.g. '.img').
       expected_chain_partitions_map: A map from partition name to the
-        tuple (rollback_index_location, key_blob).
+          tuple (rollback_index_location, key_blob).
       image_containing_descriptor: The image the descriptor is in.
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
 
     Returns:
       True if the descriptor verifies, False otherwise.
     """
-    if self.partition_name == '':
+    if not self.partition_name:
       image_filename = image_containing_descriptor.filename
       image = image_containing_descriptor
     else:
@@ -1395,7 +1438,7 @@ class AvbHashtreeDescriptor(AvbDescriptor):
     digest_size = len(hashlib.new(name=self.hash_algorithm).digest())
     digest_padding = round_to_pow2(digest_size) - digest_size
     (hash_level_offsets, tree_size) = calc_hash_level_offsets(
-      self.image_size, self.data_block_size, digest_size + digest_padding)
+        self.image_size, self.data_block_size, digest_size + digest_padding)
     root_digest, hash_tree = generate_hash_tree(image, self.image_size,
                                                 self.data_block_size,
                                                 self.hash_algorithm, self.salt,
@@ -1403,7 +1446,7 @@ class AvbHashtreeDescriptor(AvbDescriptor):
                                                 hash_level_offsets,
                                                 tree_size)
     # The root digest must match unless it is not embedded in the descriptor.
-    if len(self.root_digest) != 0 and root_digest != self.root_digest:
+    if len(self.root_digest) and root_digest != self.root_digest:
       sys.stderr.write('hashtree of {} does not match descriptor\n'.
                        format(image_filename))
       return False
@@ -1412,7 +1455,8 @@ class AvbHashtreeDescriptor(AvbDescriptor):
     hash_tree_ondisk = image.read(self.tree_size)
     is_zeroed = (self.tree_size == 0) or (hash_tree_ondisk[0:8] == 'ZeRoHaSH')
     if is_zeroed and accept_zeroed_hashtree:
-      print ('{}: skipping verification since hashtree is zeroed and --accept_zeroed_hashtree was given'
+      print ('{}: skipping verification since hashtree is zeroed and '
+             '--accept_zeroed_hashtree was given'
              .format(self.partition_name))
     else:
       if hash_tree != hash_tree_ondisk:
@@ -1422,10 +1466,10 @@ class AvbHashtreeDescriptor(AvbDescriptor):
       print ('{}: Successfully verified {} hashtree of {} for image of {} bytes'
              .format(self.partition_name, self.hash_algorithm, image.filename,
                      self.image_size))
-    # TODO: we could also verify that the FEC stored in the image is
-    # correct but this a) currently requires the 'fec' binary; and b)
-    # takes a long time; and c) is not strictly needed for
-    # verification purposes as we've already verified the root hash.
+    # TODO(zeuthen): we could also verify that the FEC stored in the image is
+    # correct but this a) currently requires the 'fec' binary; and b) takes a
+    # long time; and c) is not strictly needed for verification purposes as
+    # we've already verified the root hash.
     return True
 
 
@@ -1542,14 +1586,15 @@ class AvbHashDescriptor(AvbDescriptor):
       image_dir: The directory of the file being verified.
       image_ext: The extension of the file being verified (e.g. '.img').
       expected_chain_partitions_map: A map from partition name to the
-        tuple (rollback_index_location, key_blob).
+          tuple (rollback_index_location, key_blob).
       image_containing_descriptor: The image the descriptor is in.
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
 
     Returns:
       True if the descriptor verifies, False otherwise.
     """
-    if self.partition_name == '':
+    if not self.partition_name:
       image_filename = image_containing_descriptor.filename
       image = image_containing_descriptor
     else:
@@ -1561,7 +1606,7 @@ class AvbHashDescriptor(AvbDescriptor):
     ha.update(data)
     digest = ha.digest()
     # The digest must match unless there is no digest in the descriptor.
-    if len(self.digest) != 0 and digest != self.digest:
+    if len(self.digest) and digest != self.digest:
       sys.stderr.write('{} digest of {} does not match digest in descriptor\n'.
                        format(self.hash_algorithm, image_filename))
       return False
@@ -1654,15 +1699,17 @@ class AvbKernelCmdlineDescriptor(AvbDescriptor):
       image_dir: The directory of the file being verified.
       image_ext: The extension of the file being verified (e.g. '.img').
       expected_chain_partitions_map: A map from partition name to the
-        tuple (rollback_index_location, key_blob).
+          tuple (rollback_index_location, key_blob).
       image_containing_descriptor: The image the descriptor is in.
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
 
     Returns:
       True if the descriptor verifies, False otherwise.
     """
     # Nothing to verify.
     return True
+
 
 class AvbChainPartitionDescriptor(AvbDescriptor):
   """A class for chained partition descriptors.
@@ -1758,9 +1805,10 @@ class AvbChainPartitionDescriptor(AvbDescriptor):
       image_dir: The directory of the file being verified.
       image_ext: The extension of the file being verified (e.g. '.img').
       expected_chain_partitions_map: A map from partition name to the
-        tuple (rollback_index_location, key_blob).
+          tuple (rollback_index_location, key_blob).
       image_containing_descriptor: The image the descriptor is in.
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
 
     Returns:
       True if the descriptor verifies, False otherwise.
@@ -1886,12 +1934,498 @@ class AvbFooter(object):
                        self.vbmeta_offset, self.vbmeta_size)
 
 
+# Android Firmware Transparency Log Data Structures
+
+
+class AvbIcpHeader(object):
+  """A class for the transparency log inclusion proof header.
+
+  Attributes:
+    magic: Magic for identifying the ICP header.
+    required_icp_version_major: The major version of AVB that wrote the entry.
+    required_icp_version_minor: The minor version of AVB that wrote the entry.
+    algorithm: Hash algorithm used. ID is defined in ALGORITHMS.
+    icp_count: Number of inclusion proofs represented in this structure.
+  """
+
+  SIZE = 18  # The size of the structure, in bytes
+  MAGIC = 'AFTL'
+  FORMAT_STRING = ('!4s2L'  # magic, major & minor version
+                   'L'      # algorithm type for transparency log
+                   'H')     # number of inclusion proof entries
+
+  def __init__(self, data=None):
+    """Initializes a new transparency header object.
+
+    Arguments:
+      data: If not None, must be a bytearray of size == 18.
+    """
+    assert struct.calcsize(self.FORMAT_STRING) == self.SIZE
+
+    if data:
+      (self.magic, self.required_icp_version_major,
+       self.required_icp_version_minor, self.algorithm,
+       self.icp_count) = struct.unpack(self.FORMAT_STRING, data)
+    else:
+      self.magic = self.MAGIC
+      self.required_icp_version_major = AVB_VERSION_MAJOR
+      self.required_icp_version_minor = AVB_VERSION_MINOR
+      self.algorithm = 0
+      self.icp_count = 0
+
+  def save(self, output):
+    """Serializes the transparency header (18) to disk.
+
+    Arguments:
+      output: The object to write the header to.
+    """
+    output.write(self.encode())
+
+  def encode(self):
+    """Serializes the header (18) to a bytearray().
+
+    Returns:
+      A bytearray() with the encoded header.
+    """
+    return struct.pack(self.FORMAT_STRING, self.magic,
+                       self.required_icp_version_major,
+                       self.required_icp_version_minor,
+                       self.algorithm, self.icp_count)
+
+  def is_valid(self):
+    """Ensures that values in an AvbIcpHeader structure are sane.
+
+    Returns:
+      True if the values in the AvbIcpHeader are sane, False otherwise.
+    """
+    if self.magic != AvbIcpHeader.MAGIC:
+      sys.stderr.write(
+          'ICP Header: magic value mismatch: {}\n'.format(self.magic))
+      return False
+    if self.required_icp_version_major > AVB_VERSION_MAJOR:
+      sys.stderr.write('ICP header: major version mismatch: {}\n'.format(
+          self.required_icp_version_major))
+      return False
+    if self.required_icp_version_minor > AVB_VERSION_MINOR:
+      sys.stderr.write('ICP header: minor version mismatch: {}\n'.format(
+          self.required_icp_version_minor))
+      return False
+    if self.algorithm < 0 or self.algorithm >= len(ALGORITHMS):
+      sys.stderr.write(
+          'ICP header: algorithm identifier out of range: {}\n'.format(
+              self.algorithm))
+      return False
+    if self.icp_count < 0:
+      sys.stderr.write(
+          'ICP header: ICP entry count out of range: {}\n'.format(
+              self.icp_count))
+      return False
+    return True
+
+
+class AvbIcpEntry(object):
+  """A class for the transparency log inclusion proof entries.
+
+  The data that represents each of the components of the ICP entry are stored
+  immediately following the ICP entry header. The format is log_url,
+  SignedLogRoot, and inclusion proof hashes.
+
+  Attributes:
+    log_url_size: Length of the string representing the transparency log URL.
+    leaf_index: Leaf index in the transparency log representing this entry.
+    signed_root_blob_size: Size of the SignedLogRoot for the transparency log;
+        treat as an opaque blob for now.
+    proof_hash_count: Number of hashes comprising the inclusion proof.
+    proof_size: The total size of the inclusion proof, in bytes.
+    next_entry: 1 if there is a next entry, 0 otherwise.
+  """
+  SIZE = 22  # The size of the structure, in bytes
+  FORMAT_STRING = ('!L'   # transparency log server url size
+                   'Q'    # leaf index
+                   'L'    # signed tree root blob size
+                   'B'    # number of hashes in the inclusion proof
+                   'L'    # size of the inclusion proof in bytes
+                   'B')   # next entry marker
+
+  def __init__(self, data=None):
+    """Initializes a new ICP entry object.
+
+    Arguments:
+      data: If not None, must be a bytearray of size == 22.
+    """
+    assert struct.calcsize(self.FORMAT_STRING) == self.SIZE
+
+    if data:
+      (self.log_url_size, self.leaf_index, self.signed_root_blob_size,
+       self.proof_hash_count, self.proof_size,
+       self.next_entry) = struct.unpack(self.FORMAT_STRING, data)
+    else:
+      self.log_url_size = 0
+      self.leaf_index = 0
+      self.signed_root_blob_size = 0
+      self.proof_hash_count = 0
+      self.proof_size = 0
+      self.next_entry = 0
+
+  def save(self, output):
+    """Serializes the transparency header (22) to disk.
+
+    Arguments:
+      output: The object to write the header to.
+    """
+    output.write(self.encode())
+
+  def encode(self):
+    """Serializes the header (22) to a bytearray().
+
+    Returns:
+      A bytearray() with the encoded header.
+    """
+    return struct.pack(self.FORMAT_STRING, self.log_url_size,
+                       self.leaf_index, self.signed_root_blob_size,
+                       self.proof_hash_count, self.proof_size,
+                       self.next_entry)
+
+  def is_valid(self):
+    """Ensures that values in an AvbIcpEntry structure are sane.
+
+    Returns:
+      True if the values in the AvbIcpEntry are sane, False otherwise.
+    """
+    if self.log_url_size < 0:
+      sys.stderr.write(
+          'ICP entry: invalid transparency log URL size: {}\n'.format(
+              self.log_url_size))
+      return False
+    if self.leaf_index < 0:
+      sys.stderr.write('ICP entry: leaf index out of range: {}\n'.format(
+          self.leaf_index))
+      return False
+    if self.signed_root_blob_size < 0:
+      sys.stderr.write('ICP entry: invalid signed root blob size: {}\n'.format(
+          self.signed_root_blob_size))
+      return False
+    if self.proof_hash_count < 0:
+      sys.stderr.write('ICP entry: invalid proof count: {}\n'.format(
+          self.proof_hash_count))
+      return False
+    if self.proof_size < 0:
+      sys.stderr.write(
+          'ICP entry: invalid transparency log proof size: {}\n'.format(
+              self.proof_size))
+      return False
+    if self.next_entry != 0 and self.next_entry != 1:
+      sys.stderr.write('ICP entry: invalid next entry value: {}\n'.format(
+          self.next_entry))
+      return False
+    return True
+
+
+def validate_icp_blob(icp_blob):
+  """Ensures that values in an ICP section are structurally sane.
+
+  Arguments:
+    icp_blob: A bytearray() that contains an ICP, with headers, entries and
+        data.
+
+  Returns:
+    True if the values in the ICP section are sane, False otherwise.
+  """
+  icp_blob_size = len(icp_blob)
+  icp_header_bytes = icp_blob[0:AvbIcpHeader.SIZE]
+  icp_header = AvbIcpHeader(icp_header_bytes)
+  if not icp_header.is_valid():
+    sys.stderr.write('Validation of ICP header failed.\n')
+    return False
+
+  icp_count = icp_header.icp_count
+  algorithm_id = icp_header.algorithm
+  proof_hash_size = lookup_hash_size_by_type(algorithm_id)
+
+  # jump past the header for entry processing
+  icp_index = AvbIcpHeader.SIZE
+  # Validate each entry
+  for i in range(icp_count):
+    # get the entry header from the ICP blob
+    cur_icp_entry_blob = icp_blob[icp_index:(icp_index+AvbIcpEntry.SIZE)]
+    cur_icp_entry = AvbIcpEntry(cur_icp_entry_blob)
+
+    # now validate the entry structure
+    if not cur_icp_entry.is_valid():
+      sys.stderr.write('Validation of ICP entry {} failed.\n'.format(i))
+      return False
+    # jump past the entry header to the data blob
+    icp_index += AvbIcpEntry.SIZE
+    # extract each value from the data blob:
+    transparency_log_url = icp_blob[icp_index:(icp_index
+                                               + cur_icp_entry.log_url_size)]
+    icp_index += cur_icp_entry.log_url_size
+    sth = icp_blob[icp_index:(icp_index+cur_icp_entry.signed_root_blob_size)]
+    icp_index += cur_icp_entry.signed_root_blob_size
+    if cur_icp_entry.proof_size / cur_icp_entry.proof_hash_count != proof_hash_size:
+      sys.stderr.write('Bad proof size: {} in ICP entry {}'.format(
+          cur_icp_entry.proof_size, i))
+      return False
+    proof_size = icp_blob[icp_index:(icp_index+cur_icp_entry.proof_size)]
+    icp_index += cur_icp_entry.proof_size
+    # check if there is a next entry
+    if cur_icp_entry.next_entry == 0:
+      if i != icp_count - 1:
+        sys.stderr.write('ICP entry count mismatch\n')
+        return False
+      break
+  if icp_index != len(icp_blob):
+    sys.stderr.write('ICP blob size mismatch, expected {}, got {}\n'.format(
+        len(icp_blob), icp_index))
+    return False
+  return True
+
+# AFTL structure test functions
+
+
+def test_default_icp_header():
+  """Performs validation on a default ICP header structure.
+
+  Returns:
+    True if the tests pass, False otherwise.
+  """
+
+  icp_header = AvbIcpHeader()
+  if icp_header.is_valid():
+    sys.stdout.write('ICP header: validation passed\n')
+    return True
+  else:
+    sys.stdout.write('ICP header: validation failed\n')
+    return False
+
+
+def test_icp_header(algorithm, icp_count):
+  """Create an ICP header structure and attempt to validate it.
+
+  Arguments:
+    algorithm: The algorithm to be used.
+    icp_count: Number of ICPs that follow the ICP header.
+
+  Returns:
+    True if the tests pass, False otherwise.
+  """
+
+  icp_header = AvbIcpHeader()
+  icp_header.algorithm = algorithm
+  icp_header.icp_count = icp_count
+  if icp_header.is_valid():
+    sys.stdout.write('ICP header: validation passed\n')
+    return True
+  else:
+    sys.stdout.write('ICP header: validation failed\n')
+    return False
+
+
+def test_default_icp_entry():
+  """Performs validation on an empty ICP entry structure.
+
+  Returns:
+    True if the tests pass, False otherwise.
+  """
+
+  icp_entry = AvbIcpEntry()
+  if icp_entry.is_valid():
+    sys.stdout.write('ICP entry validation passed\n')
+    return True
+  else:
+    sys.stdout.write('ICP entry validation failed\n')
+    return False
+
+
+def test_icp_entry(log_url_size, leaf_index, signed_root_blob_size,
+                   proof_hash_count, proof_size, next_entry):
+  """Create an ICP entry structure and attempt to validate it.
+
+  Returns:
+    True if the tests pass, False otherwise.
+  """
+
+  icp_entry = AvbIcpEntry()
+  icp_entry.log_url_size = log_url_size
+  icp_entry.leaf_index = leaf_index
+  icp_entry.signed_root_blob_size = signed_root_blob_size
+  icp_entry.proof_hash_count = proof_hash_count
+  icp_entry.proof_size = proof_size
+  icp_entry.next_entry = next_entry
+  if icp_entry.is_valid():
+    sys.stdout.write('ICP entry validation passed\n')
+    return True
+  else:
+    sys.stdout.write('ICP entry validation failed\n')
+    return False
+
+
+def test_generate_icp_images():
+  """Test cases for full AFTL ICP structure generation.
+
+  Returns:
+    True if all tests return expected values, False otherwise.
+  """
+
+  if not test_default_icp_header():
+    return False
+
+  if not test_icp_header(1, 1):
+    return False
+
+  icp_header = AvbIcpHeader()
+  icp_header.algorithm = 1
+  icp_header.icp_count = 1
+
+  tl_url = 'aftl-test-server.google.com'
+  sth = bytearray()
+  # fill each structure with an easily observable pattern for easy validation.
+  sth.extend('a' * 160)
+  proof_hashes = bytearray()
+  proof_hashes.extend('b' * 32)
+  proof_hashes.extend('c' * 32)
+  proof_hashes.extend('d' * 32)
+  proof_hashes.extend('e' * 32)
+  if not test_icp_entry(len(tl_url), 1, len(sth), 4, len(proof_hashes), 0):
+    return False
+  icp_entry = AvbIcpEntry()
+  icp_entry.log_url_size = len(tl_url)
+  icp_entry.leaf_index = 1
+  icp_entry.signed_root_blob_size = len(sth)
+  icp_entry.proof_hash_count = 4
+  icp_entry.proof_size = len(proof_hashes)
+  icp_entry.next_entry = 0
+  icp_data = bytearray()
+  icp_data.extend(tl_url)
+  icp_data.extend(sth)
+  icp_data.extend(proof_hashes)
+  icp_blob = bytearray()
+  icp_blob.extend(icp_header.encode())
+  icp_blob.extend(icp_entry.encode())
+  icp_blob.extend(icp_data)
+  if not validate_icp_blob(icp_blob):
+    return False
+  # Now add a 2nd entry (this should fail).
+  tl_url2 = 'aftl-test-server.google.ch'
+  sth2 = bytearray()
+  sth2.extend('f' * 192)
+  proof_hashes2 = bytearray()
+  proof_hashes2.extend('g' * 32)
+  proof_hashes2.extend('h' * 32)
+  if not test_icp_entry(len(tl_url2), 2, len(sth2), 2, len(proof_hashes2), 0):
+    return False
+  icp_entry2 = AvbIcpEntry()
+  icp_entry2.log_url_size = len(tl_url2)
+  icp_entry2.leaf_index = 2
+  icp_entry2.signed_root_blob_size = len(sth2)
+  icp_entry2.proof_hash_count = 2
+  icp_entry2.proof_size = len(proof_hashes2)
+  icp_entry2.next_entry = 0
+  icp_data2 = bytearray()
+  icp_data2.extend(tl_url2)
+  icp_data2.extend(sth2)
+  icp_data2.extend(proof_hashes2)
+  icp_blob.extend(icp_entry2.encode())
+  icp_blob.extend(icp_data2)
+  if validate_icp_blob(icp_blob):
+    return False
+  # Now fix the entries so this passes.
+  icp_header.icp_count = 2
+  icp_entry.next_entry = 1
+  icp_blob2 = bytearray()
+  icp_blob2.extend(icp_header.encode())
+  icp_blob2.extend(icp_entry.encode())
+  icp_blob2.extend(icp_data)
+  icp_blob2.extend(icp_entry2.encode())
+  icp_blob2.extend(icp_data2)
+  if not validate_icp_blob(icp_blob2):
+    return False
+  return True
+
+
+def test_icp_image():
+  """The main function that handles testing all AFTL related components.
+
+  Currently performs tests for validation of AFTL related structures.
+
+  Returns:
+    True if all tests pass, False otherwise.
+  """
+
+  # Header related tests.
+  default_icp = test_default_icp_header()
+  # 1 is SHA256/RSA4096
+  if not test_icp_header(1, 4):
+    return False
+  # Header related failure tests.
+  if test_icp_header(-12, 4):
+    return False
+  if test_icp_header(4, -34):
+    return False
+  if test_icp_header(10, 10):
+    return False
+  # ICP entry related tests.
+  if not test_default_icp_entry():
+    return False
+  if not test_icp_entry(28, 2, 92, 2, 64, 0):
+    return False
+  if not test_icp_entry(28, 4, 160, 4, 128, 1):
+    return False
+  # ICP entry related failure tests.
+  if test_icp_entry(-2, 2, 92, 2, 64, 0):
+    return False
+  if test_icp_entry(28, -1, 92, 2, 64, 0):
+    return False
+  if test_icp_entry(28, 2, -2, 2, 64, 0):
+    return False
+  if test_icp_entry(28, 2, 92, 4, 128, 32234):
+    return False
+  # Tests for the full AFTL ICP structure.
+  if not test_generate_icp_images():
+    return False
+  sys.stdout.write('All AFTL ICP tests passed.\n')
+  return True
+
+
 class AvbVBMetaHeader(object):
   """A class for parsing and writing AVB vbmeta images.
 
+  The attributes correspond to the |AvbVBMetaImageHeader| struct defined in
+  avb_vbmeta_image.h.
+
   Attributes:
-    The attributes correspond to the |AvbVBMetaImageHeader| struct defined in
-    avb_vbmeta_image.h.
+    magic: Four bytes equal to "AVB0" (AVB_MAGIC).
+    required_libavb_version_major: The major version of libavb required for this
+        header.
+    required_libavb_version_minor: The minor version of libavb required for this
+        header.
+    authentication_data_block_size: The size of the signature block.
+    auxiliary_data_block_size: The size of the auxiliary data block.
+    algorithm_type: The verification algorithm used, see |AvbAlgorithmType|
+        enum.
+    hash_offset: Offset into the "Authentication data" block of hash data.
+    hash_size: Length of the hash data.
+    signature_offset: Offset into the "Authentication data" block of signature
+        data.
+    signature_size: Length of the signature data.
+    public_key_offset: Offset into the "Auxiliary data" block of public key
+        data.
+    public_key_size: Length of the public key data.
+    public_key_metadata_offset: Offset into the "Auxiliary data" block of public
+        key metadata.
+    public_key_metadata_size: Length of the public key metadata. Must be set to
+        zero if there is no public key metadata.
+    descriptors_offset: Offset into the "Auxiliary data" block of descriptor
+        data.
+    descriptors_size: Length of descriptor data.
+    rollback_index: The rollback index which can be used to prevent rollback to
+        older versions.
+    flags: Flags from the AvbVBMetaImageFlags enumeration. This must be set to
+        zero if the vbmeta image is not a top-level image.
+    release_string: The release string from avbtool, e.g. "avbtool 1.0.0" or
+        "avbtool 1.0.0 xyz_board Git-234abde89". Is guaranteed to be NUL
+        terminated. Applications must not make assumptions about how this
+        string is formatted.
   """
 
   SIZE = 256
@@ -2174,7 +2708,7 @@ class Avb(object):
                      'block size {}.'.format(partition_size,
                                              image.block_size))
 
-    (footer, vbmeta_header, descriptors, _) = self._parse_image(image)
+    (footer, _, _, _) = self._parse_image(image)
 
     if not footer:
       raise AvbError('Given image does not have a footer.')
@@ -2184,7 +2718,8 @@ class Avb(object):
 
     vbmeta_end_offset = footer.vbmeta_offset + footer.vbmeta_size
     if vbmeta_end_offset % image.block_size != 0:
-      vbmeta_end_offset += image.block_size - (vbmeta_end_offset % image.block_size)
+      vbmeta_end_offset += image.block_size - (vbmeta_end_offset
+                                               % image.block_size)
 
     if partition_size < vbmeta_end_offset + 1*image.block_size:
       raise AvbError('Requested size of {} is too small for an image '
@@ -2290,21 +2825,26 @@ class Avb(object):
     if num_printed == 0:
       o.write('    (none)\n')
 
-  def verify_image(self, image_filename, key_path, expected_chain_partitions, follow_chain_partitions,
-                   accept_zeroed_hashtree):
+  def verify_image(self, image_filename, key_path, expected_chain_partitions,
+                   follow_chain_partitions, accept_zeroed_hashtree):
     """Implements the 'verify_image' command.
 
     Arguments:
       image_filename: Image file to get information from (file object).
-      key_path: None or check that embedded public key matches key at given path.
+      key_path: None or check that embedded public key matches key at given
+          path.
       expected_chain_partitions: List of chain partitions to check or None.
-      follow_chain_partitions: If True, will follows chain partitions even when not
-                               specified with the --expected_chain_partition option
-      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is zeroed out.
+      follow_chain_partitions:
+          If True, will follows chain partitions even when not specified with
+          the --expected_chain_partition option
+      accept_zeroed_hashtree: If True, don't fail if hashtree or FEC data is
+          zeroed out.
+
+    Raises:
+      AvbError: If verification of the image fails.
     """
     expected_chain_partitions_map = {}
     if expected_chain_partitions:
-      used_locations = {}
       for cp in expected_chain_partitions:
         cp_tokens = cp.split(':')
         if len(cp_tokens) != 3:
@@ -2313,27 +2853,31 @@ class Avb(object):
         rollback_index_location = int(cp_tokens[1])
         file_path = cp_tokens[2]
         pk_blob = open(file_path).read()
-        expected_chain_partitions_map[partition_name] = (rollback_index_location, pk_blob)
+        expected_chain_partitions_map[partition_name] = (
+            rollback_index_location, pk_blob)
 
     image_dir = os.path.dirname(image_filename)
     image_ext = os.path.splitext(image_filename)[1]
 
     key_blob = None
     if key_path:
-      print 'Verifying image {} using key at {}'.format(image_filename, key_path)
+      print 'Verifying image {} using key at {}'.format(image_filename,
+                                                        key_path)
       key_blob = encode_rsa_key(key_path)
     else:
-      print 'Verifying image {} using embedded public key'.format(image_filename)
+      print 'Verifying image {} using embedded public key'.format(
+          image_filename)
 
     image = ImageHandler(image_filename)
-    (footer, header, descriptors, image_size) = self._parse_image(image)
+    (footer, header, descriptors, _) = self._parse_image(image)
     offset = 0
     if footer:
       offset = footer.vbmeta_offset
 
     image.seek(offset)
-    vbmeta_blob = image.read(header.SIZE + header.authentication_data_block_size +
-                             header.auxiliary_data_block_size)
+    vbmeta_blob = image.read(header.SIZE
+                             + header.authentication_data_block_size
+                             + header.auxiliary_data_block_size)
 
     alg_name, _ = lookup_algorithm_by_type(header.algorithm_type)
     if not verify_vbmeta_signature(header, vbmeta_blob):
@@ -2345,7 +2889,8 @@ class Avb(object):
       key_offset = AvbVBMetaHeader.SIZE
       key_offset += header.authentication_data_block_size
       key_offset += header.public_key_offset
-      key_blob_in_vbmeta = vbmeta_blob[key_offset:key_offset + header.public_key_size]
+      key_blob_in_vbmeta = vbmeta_blob[key_offset:key_offset
+                                       + header.public_key_size]
       if key_blob != key_blob_in_vbmeta:
         raise AvbError('Embedded public key does not match given key.')
 
@@ -2357,24 +2902,29 @@ class Avb(object):
              .format(alg_name, image.filename))
 
     for desc in descriptors:
-      if (isinstance(desc, AvbChainPartitionDescriptor) and follow_chain_partitions and
-          expected_chain_partitions_map.get(desc.partition_name) == None):
+      if (isinstance(desc, AvbChainPartitionDescriptor)
+          and follow_chain_partitions
+          and expected_chain_partitions_map.get(desc.partition_name) is None):
         # In this case we're processing a chain descriptor but don't have a
         # --expect_chain_partition ... however --follow_chain_partitions was
         # specified so we shouldn't error out in desc.verify().
-        print ('{}: Chained but ROLLBACK_SLOT (which is {}) and KEY (which has sha1 {}) not specified'
-              .format(desc.partition_name, desc.rollback_index_location,
-                      hashlib.sha1(desc.public_key).hexdigest()))
+        print ('{}: Chained but ROLLBACK_SLOT (which is {}) '
+               'and KEY (which has sha1 {}) not specified'
+               .format(desc.partition_name, desc.rollback_index_location,
+                       hashlib.sha1(desc.public_key).hexdigest()))
       else:
-        if not desc.verify(image_dir, image_ext, expected_chain_partitions_map, image,
-                           accept_zeroed_hashtree):
+        if not desc.verify(image_dir, image_ext, expected_chain_partitions_map,
+                           image, accept_zeroed_hashtree):
           raise AvbError('Error verifying descriptor.')
-      # Honor --follow_chain_partitions - add '--' to make the output more readable.
-      if isinstance(desc, AvbChainPartitionDescriptor) and follow_chain_partitions:
+      # Honor --follow_chain_partitions - add '--' to make the output more
+      # readable.
+      if (isinstance(desc, AvbChainPartitionDescriptor)
+          and follow_chain_partitions):
         print '--'
-        chained_image_filename = os.path.join(image_dir, desc.partition_name + image_ext)
-        self.verify_image(chained_image_filename, key_path, None, False, accept_zeroed_hashtree)
-
+        chained_image_filename = os.path.join(image_dir,
+                                              desc.partition_name + image_ext)
+        self.verify_image(chained_image_filename, key_path, None, False,
+                          accept_zeroed_hashtree)
 
   def calculate_vbmeta_digest(self, image_filename, hash_algorithm, output):
     """Implements the 'calculate_vbmeta_digest' command.
@@ -2389,7 +2939,7 @@ class Avb(object):
     image_ext = os.path.splitext(image_filename)[1]
 
     image = ImageHandler(image_filename)
-    (footer, header, descriptors, image_size) = self._parse_image(image)
+    (footer, header, descriptors, _) = self._parse_image(image)
     offset = 0
     if footer:
       offset = footer.vbmeta_offset
@@ -2403,9 +2953,10 @@ class Avb(object):
 
     for desc in descriptors:
       if isinstance(desc, AvbChainPartitionDescriptor):
-        ch_image_filename = os.path.join(image_dir, desc.partition_name + image_ext)
+        ch_image_filename = os.path.join(image_dir,
+                                         desc.partition_name + image_ext)
         ch_image = ImageHandler(ch_image_filename)
-        (ch_footer, ch_header, ch_descriptors, ch_image_size) = self._parse_image(ch_image)
+        (ch_footer, ch_header, _, _) = self._parse_image(ch_image)
         ch_offset = 0
         ch_size = (ch_header.SIZE + ch_header.authentication_data_block_size +
                    ch_header.auxiliary_data_block_size)
@@ -2417,7 +2968,6 @@ class Avb(object):
 
     digest = hasher.digest()
     output.write('{}\n'.format(digest.encode('hex')))
-
 
   def calculate_kernel_cmdline(self, image_filename, hashtree_disabled, output):
     """Implements the 'calculate_kernel_cmdline' command.
@@ -2437,7 +2987,8 @@ class Avb(object):
     cmdline_descriptors = []
     for desc in descriptors:
       if isinstance(desc, AvbChainPartitionDescriptor):
-        ch_image_filename = os.path.join(image_dir, desc.partition_name + image_ext)
+        ch_image_filename = os.path.join(image_dir,
+                                         desc.partition_name + image_ext)
         ch_image = ImageHandler(ch_image_filename)
         _, _, ch_descriptors, _ = self._parse_image(ch_image)
         for ch_desc in ch_descriptors:
@@ -2449,16 +3000,18 @@ class Avb(object):
     kernel_cmdline_snippets = []
     for desc in cmdline_descriptors:
       use_cmdline = True
-      if (desc.flags & AvbKernelCmdlineDescriptor.FLAGS_USE_ONLY_IF_HASHTREE_NOT_DISABLED) != 0:
+      if ((desc.flags &
+           AvbKernelCmdlineDescriptor.FLAGS_USE_ONLY_IF_HASHTREE_NOT_DISABLED)
+          != 0):
         if hashtree_disabled:
           use_cmdline = False
-      if (desc.flags & AvbKernelCmdlineDescriptor.FLAGS_USE_ONLY_IF_HASHTREE_DISABLED) != 0:
+      if (desc.flags &
+          AvbKernelCmdlineDescriptor.FLAGS_USE_ONLY_IF_HASHTREE_DISABLED) != 0:
         if not hashtree_disabled:
           use_cmdline = False
       if use_cmdline:
         kernel_cmdline_snippets.append(desc.kernel_cmdline)
     output.write(' '.join(kernel_cmdline_snippets))
-
 
   def _parse_image(self, image):
     """Gets information about an image.
@@ -2618,6 +3171,14 @@ class Avb(object):
       raise AvbError('No hashtree descriptor in given image')
 
     return self._get_cmdline_descriptors_for_hashtree_descriptor(ht)
+
+  def icp_test_suite(self):
+    """Implements a self-contained test suite for AFTL related code.
+
+    Returns:
+      True if all tests pass, False otherwise.
+    """
+    return test_icp_image()
 
   def make_vbmeta_image(self, output, chain_partitions, algorithm_name,
                         key_path, public_key_metadata_path, rollback_index,
@@ -2852,7 +3413,7 @@ class Avb(object):
             descriptors_dict[key] = desc.encode()
           else:
             encoded_descriptors.extend(desc.encode())
-      for key in sorted(descriptors_dict.keys()):
+      for key in sorted(descriptors_dict):
         encoded_descriptors.extend(descriptors_dict[key])
 
     # Load public key metadata blob, if requested.
@@ -3246,7 +3807,8 @@ class Avb(object):
                           release_string, append_to_release_string,
                           output_vbmeta_image, do_not_append_vbmeta_image,
                           print_required_libavb_version,
-                          use_persistent_root_digest, do_not_use_ab, no_hashtree):
+                          use_persistent_root_digest, do_not_use_ab,
+                          no_hashtree):
     """Implements the 'add_hashtree_footer' command.
 
     See https://gitlab.com/cryptsetup/cryptsetup/wikis/DMVerity for
@@ -3577,7 +4139,7 @@ class Avb(object):
     Raises:
       AvbError: If an argument is incorrect.
     """
-    EXPECTED_PRODUCT_ID_SIZE = 16
+    EXPECTED_PRODUCT_ID_SIZE = 16  # pylint: disable=invalid-name
     if len(product_id) != EXPECTED_PRODUCT_ID_SIZE:
       raise AvbError('Invalid Product ID length.')
     output.write(struct.pack('<I', 1))  # Format Version
@@ -3604,7 +4166,7 @@ class Avb(object):
     Raises:
       AvbError: If an argument is incorrect.
     """
-    EXPECTED_CERTIFICATE_SIZE = 1620
+    EXPECTED_CERTIFICATE_SIZE = 1620  # pylint: disable=invalid-name
     if len(intermediate_key_certificate) != EXPECTED_CERTIFICATE_SIZE:
       raise AvbError('Invalid intermediate key certificate length.')
     if len(product_key_certificate) != EXPECTED_CERTIFICATE_SIZE:
@@ -3644,8 +4206,8 @@ class Avb(object):
     Raises:
       AvbError: If an argument is incorrect.
     """
-    EXPECTED_CERTIFICATE_SIZE = 1620
-    EXPECTED_CHALLENGE_SIZE = 16
+    EXPECTED_CERTIFICATE_SIZE = 1620  # pylint: disable=invalid-name
+    EXPECTED_CHALLENGE_SIZE = 16  # pylint: disable=invalid-name
     if len(intermediate_key_certificate) != EXPECTED_CERTIFICATE_SIZE:
       raise AvbError('Invalid intermediate key certificate length.')
     if len(unlock_key_certificate) != EXPECTED_CERTIFICATE_SIZE:
@@ -3720,7 +4282,7 @@ FEC_MAGIC = 0xfecfecfe
 def calc_fec_data_size(image_size, num_roots):
   """Calculates how much space FEC data will take.
 
-  Args:
+  Arguments:
     image_size: The size of the image.
     num_roots: Number of roots.
 
@@ -3746,7 +4308,7 @@ def calc_fec_data_size(image_size, num_roots):
 def generate_fec_data(image_filename, num_roots):
   """Generate FEC codes for an image.
 
-  Args:
+  Arguments:
     image_filename: The filename of the image.
     num_roots: Number of roots.
 
@@ -3775,7 +4337,7 @@ def generate_hash_tree(image, image_size, block_size, hash_alg_name, salt,
                        digest_padding, hash_level_offsets, tree_size):
   """Generates a Merkle-tree for a file.
 
-  Args:
+  Arguments:
     image: The image, as a file.
     image_size: The size of the image.
     block_size: The block size, e.g. 4096.
@@ -3976,6 +4538,11 @@ class AvbTool(object):
                             required=True)
     sub_parser.set_defaults(func=self.extract_public_key)
 
+    sub_parser = subparsers.add_parser(
+        'icp_test_suite',
+        help='Test suite for ICP related functionality.')
+    sub_parser.set_defaults(func=self.icp_test_suite)
+
     sub_parser = subparsers.add_parser('make_vbmeta_image',
                                        help='Makes a vbmeta image.')
     sub_parser.add_argument('--output',
@@ -3984,7 +4551,8 @@ class AvbTool(object):
     sub_parser.add_argument('--padding_size',
                             metavar='NUMBER',
                             help='If non-zero, pads output with NUL bytes so '
-                                 'its size is a multiple of NUMBER (default: 0)',
+                                 'its size is a multiple of NUMBER '
+                                 '(default: 0)',
                             type=parse_number,
                             default=0)
     self._add_common_args(sub_parser)
@@ -4037,8 +4605,9 @@ class AvbTool(object):
                             type=argparse.FileType('rb'))
     sub_parser.set_defaults(func=self.append_vbmeta_image)
 
-    sub_parser = subparsers.add_parser('add_hashtree_footer',
-                                       help='Add hashtree and footer to image.')
+    sub_parser = subparsers.add_parser(
+        'add_hashtree_footer',
+        help='Add hashtree and footer to image.')
     sub_parser.add_argument('--image',
                             help='Image to add hashtree to',
                             type=argparse.FileType('rab+'))
@@ -4066,9 +4635,10 @@ class AvbTool(object):
     sub_parser.add_argument('--generate_fec',
                             help=argparse.SUPPRESS,
                             action='store_true')
-    sub_parser.add_argument('--do_not_generate_fec',
-                            help='Do not generate forward-error-correction codes',
-                            action='store_true')
+    sub_parser.add_argument(
+        '--do_not_generate_fec',
+        help='Do not generate forward-error-correction codes',
+        action='store_true')
     sub_parser.add_argument('--fec_num_roots',
                             help='Number of roots for FEC (default: 2)',
                             type=parse_number,
@@ -4119,8 +4689,9 @@ class AvbTool(object):
                             required=True)
     sub_parser.set_defaults(func=self.zero_hashtree)
 
-    sub_parser = subparsers.add_parser('extract_vbmeta_image',
-                                       help='Extracts vbmeta from an image with a footer.')
+    sub_parser = subparsers.add_parser(
+        'extract_vbmeta_image',
+        help='Extracts vbmeta from an image with a footer.')
     sub_parser.add_argument('--image',
                             help='Image with footer',
                             type=argparse.FileType('rb'),
@@ -4131,7 +4702,8 @@ class AvbTool(object):
     sub_parser.add_argument('--padding_size',
                             metavar='NUMBER',
                             help='If non-zero, pads output with NUL bytes so '
-                                 'its size is a multiple of NUMBER (default: 0)',
+                                 'its size is a multiple of NUMBER '
+                                 '(default: 0)',
                             type=parse_number,
                             default=0)
     sub_parser.set_defaults(func=self.extract_vbmeta_image)
@@ -4175,13 +4747,15 @@ class AvbTool(object):
                             help='Expected chain partition',
                             metavar='PART_NAME:ROLLBACK_SLOT:KEY_PATH',
                             action='append')
-    sub_parser.add_argument('--follow_chain_partitions',
-                            help=('Follows chain partitions even when not '
-                                  'specified with the --expected_chain_partition option'),
-                            action='store_true')
-    sub_parser.add_argument('--accept_zeroed_hashtree',
-                            help=('Accept images where the hashtree or FEC data is zeroed out'),
-                            action='store_true')
+    sub_parser.add_argument(
+        '--follow_chain_partitions',
+        help=('Follows chain partitions even when not '
+              'specified with the --expected_chain_partition option'),
+        action='store_true')
+    sub_parser.add_argument(
+        '--accept_zeroed_hashtree',
+        help=('Accept images where the hashtree or FEC data is zeroed out'),
+        action='store_true')
     sub_parser.set_defaults(func=self.verify_image)
 
     sub_parser = subparsers.add_parser(
@@ -4360,6 +4934,10 @@ class AvbTool(object):
     """Implements the 'extract_public_key' sub-command."""
     self.avb.extract_public_key(args.key, args.output)
 
+  def icp_test_suite(self, _):
+    """Implements the 'icp_test_suite' sub-command."""
+    return self.avb.icp_test_suite()
+
   def make_vbmeta_image(self, args):
     """Implements the 'make_vbmeta_image' sub-command."""
     args = self._fixup_common_args(args)
@@ -4415,30 +4993,31 @@ class AvbTool(object):
       sys.stderr.write('The --generate_fec option is deprecated since FEC '
                        'is now generated by default. Use the option '
                        '--do_not_generate_fec to not generate FEC.\n')
-    self.avb.add_hashtree_footer(args.image.name if args.image else None,
-                                 args.partition_size,
-                                 args.partition_name,
-                                 not args.do_not_generate_fec, args.fec_num_roots,
-                                 args.hash_algorithm, args.block_size,
-                                 args.salt, args.chain_partition, args.algorithm,
-                                 args.key, args.public_key_metadata,
-                                 args.rollback_index, args.flags, args.prop,
-                                 args.prop_from_file,
-                                 args.kernel_cmdline,
-                                 args.setup_rootfs_from_kernel,
-                                 args.setup_as_rootfs_from_kernel,
-                                 args.include_descriptors_from_image,
-                                 args.calc_max_image_size,
-                                 args.signing_helper,
-                                 args.signing_helper_with_files,
-                                 args.internal_release_string,
-                                 args.append_to_release_string,
-                                 args.output_vbmeta_image,
-                                 args.do_not_append_vbmeta_image,
-                                 args.print_required_libavb_version,
-                                 args.use_persistent_digest,
-                                 args.do_not_use_ab,
-                                 args.no_hashtree)
+    self.avb.add_hashtree_footer(
+        args.image.name if args.image else None,
+        args.partition_size,
+        args.partition_name,
+        not args.do_not_generate_fec, args.fec_num_roots,
+        args.hash_algorithm, args.block_size,
+        args.salt, args.chain_partition, args.algorithm,
+        args.key, args.public_key_metadata,
+        args.rollback_index, args.flags, args.prop,
+        args.prop_from_file,
+        args.kernel_cmdline,
+        args.setup_rootfs_from_kernel,
+        args.setup_as_rootfs_from_kernel,
+        args.include_descriptors_from_image,
+        args.calc_max_image_size,
+        args.signing_helper,
+        args.signing_helper_with_files,
+        args.internal_release_string,
+        args.append_to_release_string,
+        args.output_vbmeta_image,
+        args.do_not_append_vbmeta_image,
+        args.print_required_libavb_version,
+        args.use_persistent_digest,
+        args.do_not_use_ab,
+        args.no_hashtree)
 
   def erase_footer(self, args):
     """Implements the 'erase_footer' sub-command."""
@@ -4479,7 +5058,8 @@ class AvbTool(object):
 
   def calculate_kernel_cmdline(self, args):
     """Implements the 'calculate_kernel_cmdline' sub-command."""
-    self.avb.calculate_kernel_cmdline(args.image.name, args.hashtree_disabled, args.output)
+    self.avb.calculate_kernel_cmdline(args.image.name, args.hashtree_disabled,
+                                      args.output)
 
   def make_atx_certificate(self, args):
     """Implements the 'make_atx_certificate' sub-command."""
