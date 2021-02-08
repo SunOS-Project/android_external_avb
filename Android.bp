@@ -88,15 +88,10 @@ python_binary_host {
         },
         py3: {
             enabled: true,
+            embedded_launcher: true,
         },
     },
-    // Need both lib to be used as data for cc_test (which default to "both")
-    compile_multilib: "both",
-    multilib: {
-        lib32: {
-            suffix: "32",
-        },
-    },
+    compile_multilib: "first",
 }
 
 python_library_host {
@@ -160,7 +155,9 @@ python_test_host {
     data: [
         "test/data/**/*.*",
     ],
-    test_suites: ["general-tests"],
+    test_options: {
+        unit_test: true,
+    },
     version: {
         py2: {
             enabled: false,
@@ -335,8 +332,15 @@ cc_test_host {
         "img2simg",
         "avbtool",
     ],
+    test_options: {
+        unit_test: true,
+    },
+    compile_multilib: "first",
     data: [
+        ":img2simg",
+        ":simg2img",
         "avbtool",
+        ":fec",
         "test/avbtool_signing_helper_test.py",
         "test/avbtool_signing_helper_with_files_test.py",
         "test/data/*",
