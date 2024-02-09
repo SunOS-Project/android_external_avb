@@ -16,9 +16,12 @@
 
 use crate::test_ops::TestOps;
 use avb::{
-    slot_verify, HashtreeErrorMode, IoError, SlotVerifyData, SlotVerifyError, SlotVerifyFlags,
-    SlotVerifyResult,
+    slot_verify, Descriptor, HashDescriptor, HashDescriptorFlags, HashtreeDescriptor,
+    HashtreeDescriptorFlags, HashtreeErrorMode, IoError, KernelCommandlineDescriptor,
+    KernelCommandlineDescriptorFlags, PropertyDescriptor, SlotVerifyData, SlotVerifyError,
+    SlotVerifyFlags, SlotVerifyResult,
 };
+use hex::decode;
 use std::{ffi::CString, fs};
 #[cfg(feature = "uuid")]
 use uuid::uuid;
@@ -26,9 +29,14 @@ use uuid::uuid;
 // These constants must match the values used to create the images in Android.bp.
 const TEST_IMAGE_PATH: &str = "test_image.img";
 const TEST_IMAGE_SIZE: usize = 16 * 1024;
+const TEST_IMAGE_SALT_HEX: &str = "1000";
+const TEST_HASHTREE_SALT_HEX: &str = "B000";
 const TEST_VBMETA_PATH: &str = "test_vbmeta.img";
 const TEST_VBMETA_2_PARTITIONS_PATH: &str = "test_vbmeta_2_parts.img";
 const TEST_VBMETA_PERSISTENT_DIGEST_PATH: &str = "test_vbmeta_persistent_digest.img";
+const TEST_VBMETA_WITH_PROPERTY_PATH: &str = "test_vbmeta_with_property.img";
+const TEST_VBMETA_WITH_HASHTREE_PATH: &str = "test_vbmeta_with_hashtree.img";
+const TEST_VBMETA_WITH_COMMANDLINE_PATH: &str = "test_vbmeta_with_commandline.img";
 const TEST_IMAGE_WITH_VBMETA_FOOTER_PATH: &str = "avbrs_test_image_with_vbmeta_footer.img";
 const TEST_IMAGE_WITH_VBMETA_FOOTER_FOR_BOOT_PATH: &str =
     "avbrs_test_image_with_vbmeta_footer_for_boot.img";
@@ -37,7 +45,19 @@ const TEST_PARTITION_NAME: &str = "test_part";
 const TEST_PARTITION_SLOT_C_NAME: &str = "test_part_c";
 const TEST_PARTITION_2_NAME: &str = "test_part_2";
 const TEST_PARTITION_PERSISTENT_DIGEST_NAME: &str = "test_part_persistent_digest";
+const TEST_PARTITION_HASH_TREE_NAME: &str = "test_part_hashtree";
 const TEST_VBMETA_ROLLBACK_LOCATION: usize = 0; // Default value, we don't explicitly set this.
+const TEST_PROPERTY_KEY: &str = "test_prop_key";
+const TEST_PROPERTY_VALUE: &[u8] = b"test_prop_value";
+const TEST_KERNEL_COMMANDLINE: &str = "test_cmdline_key=test_cmdline_value";
+
+// Expected values determined by examining the vbmeta image with `avbtool info_image`.
+// Images can be found in <out>/soong/.intermediates/external/avb/rust/.
+const TEST_IMAGE_DIGEST_HEX: &str =
+    "89e6fd3142917b8c34ac7d30897a907a71bd3bf5d9b39d00bf938b41dcf3b84f";
+const TEST_IMAGE_HASH_ALGO: &str = "sha256";
+const TEST_HASHTREE_DIGEST_HEX: &str = "5373fc4ee3dd898325eeeffb5a1dbb041900c5f1";
+const TEST_HASHTREE_ALGORITHM: &str = "sha1";
 
 /// Initializes a `TestOps` object such that verification will succeed on `TEST_PARTITION_NAME`.
 fn test_ops_one_image_one_vbmeta() -> TestOps {
@@ -600,5 +620,107 @@ fn corrupted_image_verification_data_display() {
     assert_eq!(
         format!("{data}"),
         r#"slot: "", vbmeta: ["vbmeta": Ok(())], images: ["test_part": Err(Verification(None))]"#
+    );
+}
+
+#[test]
+fn one_image_gives_single_descriptor() {
+    let mut ops = test_ops_one_image_one_vbmeta();
+
+    let result = verify_one_image_one_vbmeta(&mut ops);
+
+    let data = result.unwrap();
+    assert_eq!(data.vbmeta_data()[0].descriptors().unwrap().len(), 1);
+}
+
+#[test]
+fn two_images_gives_two_descriptors() {
+    let mut ops = test_ops_two_images_one_vbmeta();
+
+    let result = verify_two_images_one_vbmeta(&mut ops);
+
+    let data = result.unwrap();
+    assert_eq!(data.vbmeta_data()[0].descriptors().unwrap().len(), 2);
+}
+
+/// Runs verification on the given contents and checks for a resulting descriptor.
+///
+/// This test helper performs the following steps:
+///
+/// 1. set up a `TestOps` for the default test image/vbmeta
+/// 2. replace the vbmeta image with the contents at `vbmeta_path`
+/// 3. run verification
+/// 4. check that the given `descriptor` exists in the verification data
+fn verify_and_find_descriptor(vbmeta_path: &str, expected_descriptor: &Descriptor) {
+    let mut ops = test_ops_one_image_one_vbmeta();
+
+    // Replace the vbmeta image with the requested variation.
+    ops.add_partition("vbmeta", fs::read(vbmeta_path).unwrap());
+
+    let result = verify_one_image_one_vbmeta(&mut ops);
+
+    let data = result.unwrap();
+    let descriptors = &data.vbmeta_data()[0].descriptors().unwrap();
+    assert!(descriptors.contains(expected_descriptor));
+}
+
+#[test]
+fn verify_hash_descriptor() {
+    verify_and_find_descriptor(
+        // The standard vbmeta image should contain the hash descriptor.
+        TEST_VBMETA_PATH,
+        &Descriptor::Hash(HashDescriptor {
+            image_size: TEST_IMAGE_SIZE as u64,
+            hash_algorithm: TEST_IMAGE_HASH_ALGO,
+            flags: HashDescriptorFlags(0),
+            partition_name: TEST_PARTITION_NAME,
+            salt: &decode(TEST_IMAGE_SALT_HEX).unwrap(),
+            digest: &decode(TEST_IMAGE_DIGEST_HEX).unwrap(),
+        }),
+    );
+}
+
+#[test]
+fn verify_property_descriptor() {
+    verify_and_find_descriptor(
+        TEST_VBMETA_WITH_PROPERTY_PATH,
+        &Descriptor::Property(PropertyDescriptor {
+            key: TEST_PROPERTY_KEY,
+            value: TEST_PROPERTY_VALUE,
+        }),
+    );
+}
+
+#[test]
+fn verify_hashtree_descriptor() {
+    verify_and_find_descriptor(
+        TEST_VBMETA_WITH_HASHTREE_PATH,
+        &Descriptor::Hashtree(HashtreeDescriptor {
+            dm_verity_version: 1,
+            image_size: TEST_IMAGE_SIZE as u64,
+            tree_offset: TEST_IMAGE_SIZE as u64,
+            tree_size: 4096,
+            data_block_size: 4096,
+            hash_block_size: 4096,
+            fec_num_roots: 0,
+            fec_offset: 0,
+            fec_size: 0,
+            hash_algorithm: TEST_HASHTREE_ALGORITHM,
+            flags: HashtreeDescriptorFlags(0),
+            partition_name: TEST_PARTITION_HASH_TREE_NAME,
+            salt: &decode(TEST_HASHTREE_SALT_HEX).unwrap(),
+            root_digest: &decode(TEST_HASHTREE_DIGEST_HEX).unwrap(),
+        }),
+    );
+}
+
+#[test]
+fn verify_kernel_commandline_descriptor() {
+    verify_and_find_descriptor(
+        TEST_VBMETA_WITH_COMMANDLINE_PATH,
+        &Descriptor::KernelCommandline(KernelCommandlineDescriptor {
+            flags: KernelCommandlineDescriptorFlags(0),
+            commandline: TEST_KERNEL_COMMANDLINE,
+        }),
     );
 }

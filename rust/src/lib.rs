@@ -26,10 +26,16 @@
 // panic_handler and eh_personality conditional on actually building a dylib.
 #![cfg_attr(not(any(test, android_dylib)), no_std)]
 
+mod descriptor;
 mod error;
 mod ops;
 mod verify;
 
+pub use descriptor::{
+    Descriptor, DescriptorError, DescriptorResult, HashDescriptor, HashDescriptorFlags,
+    HashtreeDescriptor, HashtreeDescriptorFlags, KernelCommandlineDescriptor,
+    KernelCommandlineDescriptorFlags, PropertyDescriptor,
+};
 pub use error::{
     IoError, IoResult, SlotVerifyError, SlotVerifyNoDataResult, SlotVerifyResult,
     VbmetaVerifyError, VbmetaVerifyResult,
