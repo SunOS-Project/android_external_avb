@@ -57,6 +57,8 @@ pub const TEST_HASHTREE_ALGORITHM: &str = "sha1";
 // Certificate test data.
 pub const TEST_CERT_PERMANENT_ATTRIBUTES_PATH: &str = "data/cert_permanent_attributes.bin";
 pub const TEST_CERT_VBMETA_PATH: &str = "test_vbmeta_cert.img";
+pub const TEST_CERT_UNLOCK_CHALLENGE_RNG_PATH: &str = "data/cert_unlock_challenge.bin";
+pub const TEST_CERT_UNLOCK_CREDENTIAL_PATH: &str = "data/cert_unlock_credential.bin";
 
 // The cert test keys were both generated with rollback version 42.
 pub const TEST_CERT_PIK_VERSION: u64 = 42;
@@ -65,3 +67,7 @@ pub const TEST_CERT_PSK_VERSION: u64 = 42;
 // $ sha256sum external/avb/test/data/cert_permanent_attributes.bin
 pub const TEST_CERT_PERMANENT_ATTRIBUTES_HASH_HEX: &str =
     "55419e1affff153b58f65ce8a5313a71d2a83a00d0abae10a25b9a8e493d04f7";
+
+// $ sha256sum external/avb/test/data/cert_product_id.bin
+pub const TEST_CERT_PRODUCT_ID_HASH_HEX: &str =
+    "374708fff7719dd5979ec875d56cd2286f6d3cf7ec317a3b25632aab28ec37bb";
